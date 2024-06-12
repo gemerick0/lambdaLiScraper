@@ -1,2 +1,8 @@
-selenium==3.14.0
+selenium
+requests
+demoji
 boto3
+pandas
+bs4
+tqdm
+selenium-wire

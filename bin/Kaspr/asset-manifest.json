@@ -1,0 +1,19 @@
+{
+  "static/js/0.chunk.js": "/static/js/0.chunk.js",
+  "static/js/0.chunk.js.map": "/static/js/0.chunk.js.map",
+  "static/css/1.chunk.css": "/static/css/1.chunk.css",
+  "static/js/1.chunk.js": "/static/js/1.chunk.js",
+  "static/js/1.chunk.js.map": "/static/js/1.chunk.js.map",
+  "app.css": "/static/css/app.css",
+  "app.js": "/static/js/app.js",
+  "app.js.map": "/static/js/app.js.map",
+  "linkedinWidget.css": "/static/css/linkedinWidget.css",
+  "linkedinWidget.js": "/static/js/linkedinWidget.js",
+  "linkedinWidget.js.map": "/static/js/linkedinWidget.js.map",
+  "static/css/app.css.map": "/static/css/app.css.map",
+  "static/css/1.chunk.css.map": "/static/css/1.chunk.css.map",
+  "static/css/linkedinWidget.css.map": "/static/css/linkedinWidget.css.map",
+  "index.html": "/index.html",
+  "precache-manifest.d1d21abce319915f6db983a56c72a0ad.js": "/precache-manifest.d1d21abce319915f6db983a56c72a0ad.js",
+  "service-worker.js": "/service-worker.js"
+}

@@ -6,7 +6,10 @@ services:
     environment:
       - PYTHONPATH=/var/task/src:/var/task/lib
       - PATH=/opt/bin
-      - URL=https://www.cnn.com
+      - BUCKET=${BUCKET}
+      - AUDIENCE_ID=${AUDIENCE_ID}
+      - SCRAPE=${SCRAPE}
+      - PROXYID=${PROXYID}
     volumes:
       - ./src/:/var/task/src/
       - ./tmp/:/tmp/

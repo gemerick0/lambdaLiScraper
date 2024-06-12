@@ -1,0 +1,1 @@
+const test ="azazazaz"export default test
