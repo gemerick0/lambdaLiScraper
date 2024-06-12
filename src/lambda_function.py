@@ -18,21 +18,17 @@ def lambda_handler(event, context):
     if os.environ['SCRAPE']:
         driver = WebDriverSalesNavScraper(os.environ['AUDIENCE_ID'], os.environ['PROXYID'])
         logger.info('## SCRAPING')
-        driver.run()
+        cookies = driver.run()
+        lk_credentials['cookies'] = cookies['li_at']
 
     else:
         driver = WebDriverProfileScraper(os.environ['AUDIENCE_ID'], os.environ['PROXYID'])
         logger.info('## ENRICHING')
+        cookies = driver.scrape()
+        lk_credentials['cookies'] = cookies['li_at']
 
 
 
     driver.close()
 
-    if all (k in os.environ for k in ('BUCKET','DESTPATH')):
-        ## Upload generated screenshot files to S3 bucket.
-        s3.upload_file('/tmp/{}-fixed.png'.format(screenshot_file),
-                    os.environ['BUCKET'],
-                    '{}/{}-fixed.png'.format(os.environ['DESTPATH'], screenshot_file))
-        s3.upload_file('/tmp/{}-full.png'.format(screenshot_file),
-                    os.environ['BUCKET'],
-                    '{}/{}-full.png'.format(os.environ['DESTPATH'], screenshot_file))
+    

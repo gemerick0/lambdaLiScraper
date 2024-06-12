@@ -11,16 +11,28 @@ import random
 import time
 import pandas as pd
 import requests
+from concurrent import futures
 from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from tqdm import tqdm
 
 class WebDriverProfileScraper:
-    def __init__(self, lk_credentials, baserow_api_token = '292983'):
+    def __init__(self, lk_credentials):
         self.audience_id = lk_credentials['audience_id']
         self.lk_credentials = lk_credentials
-        self.baserow_api_token = baserow_api_token
+        self.baserow_api_token = "wMWVhs8wuDQBLauICWYxXeN1LCE6eUwI"
+        self.baserow_table_id = "292983"
+        baserow_url = f"https://api.baserow.io/api/database/rows/table/{self.baserow_table_id}/"
+        self.filter_profiles = "?user_field_names=true&filters=%7B%22filter_type%22%3A%22AND%22%2C%22filters%22%3A%5B%5D%2C%22groups%22%3A%5B%7B%22filter_type%22%3A%22OR%22%2C%22filters%22%3A%5B%7B%22type%22%3A%22link_row_has%22%2C%22field%22%3A%22Audience%22%2C%22value%22%3A%22200%22%7D%2C%7B%22type%22%3A%22link_row_has%22%2C%22field%22%3A%22Audience%22%2C%22value%22%3A%22201%22%7D%5D%2C%22groups%22%3A%5B%5D%7D%2C%7B%22filter_type%22%3A%22OR%22%2C%22filters%22%3A%5B%7B%22type%22%3A%22equal%22%2C%22field%22%3A%22Email%22%2C%22value%22%3A%22No%20result%22%7D%2C%7B%22type%22%3A%22empty%22%2C%22field%22%3A%22Email%22%2C%22value%22%3A%22%22%7D%5D%2C%22groups%22%3A%5B%5D%7D%5D%7D"
+        self.filter_companies="?user_field_names=true&filters=%7B%22filter_type%22%3A%22AND%22%2C%22filters%22%3A%5B%5D%2C%22groups%22%3A%5B%7B%22filter_type%22%3A%22OR%22%2C%22filters%22%3A%5B%7B%22type%22%3A%22link_row_has%22%2C%22field%22%3A%22Audience%22%2C%22value%22%3A%22200%22%7D%2C%7B%22type%22%3A%22link_row_has%22%2C%22field%22%3A%22Audience%22%2C%22value%22%3A%22201%22%7D%5D%2C%22groups%22%3A%5B%5D%7D%2C%7B%22filter_type%22%3A%22OR%22%2C%22filters%22%3A%5B%7B%22type%22%3A%22empty%22%2C%22field%22%3A%22Company%20Description%22%2C%22value%22%3A%22%22%7D%2C%7B%22type%22%3A%22equal%22%2C%22field%22%3A%22Company%20Description%22%2C%22value%22%3A%22No%20Result%22%7D%5D%2C%22groups%22%3A%5B%5D%7D%5D%7D"
+        self.rows_profiles_to_process = self.fetch_filtered_baserow_table_data_concurrently(baserow_url, self.headers, self.baserow_table_id, self.filter_profiles)
+        self.rows_companies_to_process = self.fetch_filtered_baserow_table_data_concurrently(baserow_url, self.headers, self.baserow_table_id, self.filter_companies)
         self.headers = {'Authorization': f'Token {self.baserow_api_token}', 'Content-Type': 'application/json'}
+        self.idListProfiles = [row['id'] for row in self.rows_profiles_to_process]
+        self.idListCompanies = [row['id'] for row in self.rows_companies_to_process]
+        self.linkProfiles = [row['Prospect Linkedin URL'] for row in self.rows_profiles_to_process]
+        self.linkCompanies = [row.get('Company Linkedin ID URL') for row in self.rows_companies_to_process 
+                if row.get('Company Linkedin ID URL')]
         self.driver = self.setup_chrome_driver()
         self.proxyList = ["http://Tib2VnMkxa4CTYp:M3ejKPdY0Z6NevS@62.164.237.237:47617",
                           "http://bF4b1viYZHyzPhl:jGLyie044dxPdsE@62.164.236.142:44669",
@@ -31,6 +43,53 @@ class WebDriverProfileScraper:
                           "http://vvkNK4m2NnaegFf:QmUWRHQbHyevnht@207.228.22.131:45556",
                           "http://JqgBSueZPRHdLPH:yYkgQoj8GGaAQzF@207.228.20.235:43478"]
         self.proxy_id = lk_credentials['proxy_id']
+        self.SCRAPEOPS_API_KEY = 'b7c14682-a15e-48d9-a133-6b91cc022d6d'
+
+    def get_user_agent_list(self):
+        response = requests.get('http://headers.scrapeops.io/v1/user-agents?api_key=' + self.SCRAPEOPS_API_KEY)
+        json_response = response.json()
+        return json_response.get('result', [])
+
+    def get_random_user_agent(self, user_agent_list):
+        random_index = random.randint(0, len(user_agent_list) - 1)
+        return user_agent_list[random_index]
+
+    def fetch_page_baserow_table_data(self, url, headers, table_id, page, filter_query, page_size=100, attempt=1):
+        """Fetch a single page of data from the Baserow table with retry on 429."""
+        request_url = f"{url}{filter_query}&page={page}&size={page_size}"
+        response = requests.get(request_url, headers=headers)
+        if response.status_code == 200:
+            return response.json().get('results', [])
+        elif response.status_code == 429:
+            if attempt <= 5:  # Max retry attempts
+                sleep_time = attempt * 2  # Exponential backoff
+                print(f"Rate limit hit, retrying page {page} after {sleep_time} seconds...")
+                time.sleep(sleep_time)
+                return self.fetch_page_baserow_table_data(url=url, headers=headers, table_id=table_id, page=page, page_size=page_size, attempt=attempt + 1)
+            else:
+                print(f"Failed to fetch page {page} after {attempt} attempts.")
+                return []
+        else:
+            print(f"Error fetching page {page}: {response.status_code}")
+            return []
+    # Function to fetch rows based on Prospect Headline
+
+    def fetch_filtered_baserow_table_data_concurrently(self, url, headers, table_id, filter_query, max_workers=10):
+        """Fetch filtered rows from the Baserow table using concurrent requests with rate limiting."""
+        all_data = []
+        response = requests.get(url+filter_query, headers=headers)
+        if response.status_code != 200:
+            print(f"Error fetching initial data: {response.status_code}")
+            return []
+        total_pages = response.json().get('count', 0) // 100 + 1
+        with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(self.fetch_page_baserow_table_data, url, headers, table_id, page, filter_query)
+                    for page in range(1, total_pages + 1)]
+            for future in futures.as_completed(futures):
+                data = future.result()
+                all_data.extend(data)
+        return all_data
+
 
 
     def setup_chrome_driver(self):
@@ -42,6 +101,7 @@ class WebDriverProfileScraper:
         chrome_options.add_argument(r'--load-extension=/opt/bin/Kaspr,/opt/bin/CapSolver')
         chrome_options.add_argument('--headless')
         chrome_options.binary_location = "/opt/bin/chromium"
+        chrome_options.add_argument('--user-agent=' + self.get_random_user_agent(self.user_agent_list))
         options = {
             'proxy': {
                 'http': self.proxyList[self.proxy_id],
@@ -50,6 +110,32 @@ class WebDriverProfileScraper:
             }
         }
         driver = webdriver.Chrome(options=chrome_options, seleniumwire_options=options)
+        driver.maximize_window()
+        driver.get('chrome://settings/')
+        time.sleep(2)
+        driver.execute_script('chrome.settingsPrivate.setDefaultZoom(0.25);')
+        time.sleep(1)
+        driver.get("https://www.linkedin.com/login/")
+        if self.lk_credentials['cookies'] != '':
+            driver.add_cookie({"name": "li_at", "value": self.lk_credentials['cookies']})
+        else:
+            self.enter_ids_on_lk_signin(driver, self.lk_credentials['email'], self.lk_credentials['password'])
+        driver.get("https://app.kaspr.io/signin?utm_source=Widget&utm_medium=Connect")
+        time.sleep(4)
+        kUser = driver.find_element(By.XPATH, "//input[@type='text']")
+        time.sleep(0.3)
+        kUser.send_keys(self.lk_credentials["kEmail"])
+        time.sleep(0.2)
+        kBtn = driver.find_element(By.TAG_NAME, "button")
+        time.sleep(0.4)
+        kBtn.click()
+        time.sleep(2)
+        kPword = driver.find_element(By.XPATH, "//input[@type='password']")
+        kPword.send_keys(self.lk_credentials["kPassword"])
+        kBtn = driver.find_element(By.TAG_NAME, "button")
+        time.sleep(0.3)
+        kBtn.click()
+        time.sleep(3)
         return driver
 
     def add_trailing_slash(self, url):
@@ -358,10 +444,10 @@ class WebDriverProfileScraper:
                 }
                 self.export_to_baserow(new_dict, row_id)
         return
-
-    def scrape(self, company_list, profile_list, id_list, counter=0):
-        self.get_company_info(company_list, counter, id_list)
-        self.get_profile_info(profile_list, counter, id_list)
+    
+    def scrape(self, counter=0):
+        self.get_company_info(self.linkCompanies, counter, self.idListCompanies)
+        self.get_profile_info(self.linkProfiles, counter, self.idListProfiles)
         cookie_jar = self.driver.get_cookies()
         self.driver.quit()
         return cookie_jar
@@ -386,7 +472,7 @@ class WebDriverSalesNavScraper:
         self.wait_after_page_loaded = wait_after_page_loaded
         self.wait_after_scroll_down = wait_after_scroll_down
         self.save_format = save_format
-        self.pScrapedProfiles = 0
+        self.SCRAPEOPS_API_KEY = 'b7c14682-a15e-48d9-a133-6b91cc022d6d'
         self.search_url_base = self.remove_url_parameter(self.search_url, "page")
         self.driver = self.setup_chrome_driver()
         self.total_info = []
@@ -399,6 +485,18 @@ class WebDriverSalesNavScraper:
                           "http://vvkNK4m2NnaegFf:QmUWRHQbHyevnht@207.228.22.131:45556",
                           "http://JqgBSueZPRHdLPH:yYkgQoj8GGaAQzF@207.228.20.235:43478"]
         self.proxy_id = lk_credentials["proxyID"]
+        self.user_agent_list = self.get_user_agent_list()
+
+    def get_user_agent_list(self):
+        response = requests.get('http://headers.scrapeops.io/v1/user-agents?api_key=' + self.SCRAPEOPS_API_KEY)
+        json_response = response.json()
+        return json_response.get('result', [])
+
+    def get_random_user_agent(self, user_agent_list):
+        random_index = random.randint(0, len(user_agent_list) - 1)
+        return user_agent_list[random_index]
+
+    
 
     def get_sales_nav_search_url(self, audience_id, sub_audiences_table_id):
         """
@@ -465,6 +563,8 @@ class WebDriverSalesNavScraper:
         chrome_options.add_argument(r'--load-extension=/opt/bin/Kaspr,/opt/bin/CapSolver')
         chrome_options.binary_location = "/opt/bin/chromium"
         chrome_options.add_argument('--headless')
+        #chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--user-agent=' + self.get_random_user_agent(self.user_agent_list))
         options = {
             'proxy': {
                 'http': self.proxyList[self.proxy_id],
@@ -478,6 +578,26 @@ class WebDriverSalesNavScraper:
         time.sleep(2)
         driver.execute_script('chrome.settingsPrivate.setDefaultZoom(0.25);')
         time.sleep(1)
+        driver.get("https://www.linkedin.com/login/")
+        if self.lk_credentials['cookies'] != '':
+            driver.add_cookie({"name": "li_at", "value": self.lk_credentials['cookies']})
+        else:
+            self.enter_ids_on_lk_signin(driver, self.lk_credentials['email'], self.lk_credentials['password'])
+        driver.get("https://app.kaspr.io/signin?utm_source=Widget&utm_medium=Connect")
+        time.sleep(4)
+        kUser = driver.find_element(By.XPATH, "//input[@type='text']")
+        time.sleep(0.3)
+        kUser.send_keys(self.lk_credentials["kEmail"])
+        time.sleep(0.2)
+        kBtn = driver.find_element(By.TAG_NAME, "button")
+        time.sleep(0.4)
+        kBtn.click()
+        time.sleep(2)
+        kPword = driver.find_element(By.XPATH, "//input[@type='password']")
+        kPword.send_keys(self.lk_credentials["kPassword"])
+        kBtn = driver.find_element(By.TAG_NAME, "button")
+        time.sleep(0.3)
+        kBtn.click()
         return driver
 
     def get_profile_link_from_result_el(self, result_el):
@@ -604,26 +724,7 @@ class WebDriverSalesNavScraper:
         url = self.search_url_base + f"&page={page}"
         return url
 
-    def run(self,):
-        self.driver.get("https://www.linkedin.com/login/")
-        self.driver.add_cookie({"name": "li_at", "value": "YOUR_LINKEDIN_COOKIE_VALUE"})
-
-        self.driver.get("https://app.kaspr.io/signin?utm_source=Widget&utm_medium=Connect")
-        time.sleep(4)
-        kUser = self.driver.find_element(By.XPATH, "//input[@type='text']")
-        time.sleep(0.3)
-        kUser.send_keys(self.lk_credentials["kEmail"])
-        time.sleep(0.2)
-        kBtn = self.driver.find_element(By.TAG_NAME, "button")
-        time.sleep(0.4)
-        kBtn.click()
-        time.sleep(2)
-        kPword = self.driver.find_element(By.XPATH, "//input[@type='password']")
-        kPword.send_keys(self.lk_credentials["kPassword"])
-        kBtn = self.driver.find_element(By.TAG_NAME, "button")
-        time.sleep(0.3)
-        kBtn.click()
-        time.sleep(3)
+    def run(self):
         self.driver.get(self.search_url)
         time.sleep(5)
         self.driver.implicitly_wait(10)
@@ -684,8 +785,9 @@ class WebDriverSalesNavScraper:
             file_name = f"{str(int(time.time() * 1000))}_lk_salesnav_export.xlsx"
             df.to_excel(f"./lksn_data/{file_name}", index=False)
             print(f"Saved to ./lksn_data/{file_name}")"""
+        cookie_jar = self.driver.get_cookies()
         self.driver.close()
-
+        return cookie_jar
 
 
 
